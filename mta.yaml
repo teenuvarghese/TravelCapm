@@ -1,0 +1,139 @@
+_schema-version: "3.1"
+ID: Travel
+description: A simple CAP project.
+version: 1.0.0
+modules:
+- name: Travel-srv
+  type: nodejs
+  path: gen/srv
+  requires:
+  - name: Travel-db
+  provides:
+  - name: srv-api
+    properties:
+      srv-url: ${default-url}
+  parameters:
+    buildpack: nodejs_buildpack
+  build-parameters:
+    builder: npm
+- name: Travel-db-deployer
+  type: hdb
+  path: db
+  requires:
+  - name: Travel-db
+  parameters:
+    buildpack: nodejs_buildpack
+- name: Travel-destination-content
+  type: com.sap.application.content
+  requires:
+  - name: Travel-destination-service
+    parameters:
+      content-target: true
+  - name: Travel-repo-host
+    parameters:
+      service-key:
+        name: Travel-repo-host-key
+  - name: uaa_Travel
+    parameters:
+      service-key:
+        name: uaa_Travel-key
+  - name: srv-api
+  parameters:
+    content:
+      instance:
+        destinations:
+        - Name: travel_approuter_Travel_repo_host
+          ServiceInstanceName: Travel-html5-srv
+          ServiceKeyName: Travel-repo-host-key
+          sap.cloud.service: travel-approuter
+        - Authentication: OAuth2UserTokenExchange
+          Name: travel_approuter_uaa_Travel
+          ServiceInstanceName: Travel-xsuaa-service
+          ServiceKeyName: uaa_Travel-key
+          sap.cloud.service: travel-approuter
+        - Authentication: OAuth2UserTokenExchange
+          Name: travel_cap
+          TokenServiceInstanceName: Travel-xsuaa-service
+          TokenServiceKeyName: uaa_Travel-key
+          URL: ~{srv-api/srv-url}
+        existing_destinations_policy: update
+  build-parameters:
+    no-source: true
+- name: Travel-app-content
+  type: com.sap.application.content
+  path: .
+  requires:
+  - name: Travel-repo-host
+    parameters:
+      content-target: true
+  build-parameters:
+    build-result: resources
+    requires:
+    - artifacts:
+      - comtraveltravel.zip
+      name: comtraveltravel
+      target-path: resources/
+- name: comtraveltravel
+  type: html5
+  path: app/travel
+  build-parameters:
+    build-result: dist
+    builder: custom
+    commands:
+    - npm install
+    - npm run build:cf
+    supported-platforms: []
+resources:
+- name: Travel-db
+  type: com.sap.xs.hdi-container
+  parameters:
+    service: hana
+    service-plan: hdi-shared
+- name: Travel-repo-host
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: html5-apps-repo
+    service-name: Travel-html5-srv
+    service-plan: app-host
+- name: Travel-destination-service
+  type: org.cloudfoundry.managed-service
+  parameters:
+    config:
+      HTML5Runtime_enabled: true
+      init_data:
+        instance:
+          destinations:
+          - Authentication: NoAuthentication
+            HTML5.DynamicDestination: true
+            HTML5.ForwardAuthToken: true
+            Name: travel-srv
+            ProxyType: Internet
+            Type: HTTP
+            URL: ~{srv-api/srv-url}
+          - Authentication: NoAuthentication
+            Name: ui5
+            ProxyType: Internet
+            Type: HTTP
+            URL: https://ui5.sap.com
+          existing_destinations_policy: update
+      version: 1.0.0
+    service: destination
+    service-name: Travel-destination-service
+    service-plan: lite
+  requires:
+  - name: srv-api
+- name: uaa_Travel
+  type: org.cloudfoundry.managed-service
+  parameters:
+    path: ./xs-security.json
+    service: xsuaa
+    service-name: Travel-xsuaa-service
+    service-plan: application
+parameters:
+  deploy_mode: html5-repo
+  enable-parallel-deployments: true
+build-parameters:
+  before-all:
+  - builder: custom
+    commands:
+    - npx cds build --production
